@@ -1,0 +1,11 @@
+[project]
+name = "wikipedia-local"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "libzim>=3.10.0",
+    "mcp[cli]>=1.27.2",
+    "selectolax>=0.4.10",
+    "tqdm>=4.67.3",
+    "typer>=0.26.7",
+]
