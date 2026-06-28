@@ -40,9 +40,44 @@ if [ -z "${INFLUX_OPS_TOKEN:-}" ] && [ -f "$OPS_ENV" ]; then
 fi
 
 # Dashboard metric (skipped cleanly if INFLUX_OPS_TOKEN unset); runs on every exit.
+# --- best-effort "backup succeeded → Discord" green embed --------------------------------
+# Resolve a webhook (env DISCORD_WEBHOOK_URL_BACKUPS, then DISCORD_WEBHOOK_URL, then those two
+# keys from grafana/.env) and POST a green embed with a short timeout. A missing webhook or a
+# down Discord is a silent no-op — it NEVER fails or slows the backup.
+GRAFANA_ENV="${GRAFANA_ENV:-/Volumes/dev/observability/grafana/.env}"
+discord_webhook() {
+  [ -n "${DISCORD_WEBHOOK_URL_BACKUPS:-}" ] && { printf '%s' "$DISCORD_WEBHOOK_URL_BACKUPS"; return 0; }
+  [ -n "${DISCORD_WEBHOOK_URL:-}" ] && { printf '%s' "$DISCORD_WEBHOOK_URL"; return 0; }
+  [ -r "$GRAFANA_ENV" ] || return 0
+  local k v
+  for k in DISCORD_WEBHOOK_URL_BACKUPS DISCORD_WEBHOOK_URL; do
+    v="$(grep -E "^${k}=" "$GRAFANA_ENV" 2>/dev/null | head -1 | sed -E 's/^[^=]*=//' | tr -d '"'\'' \r\n' || true)"
+    [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  done
+  return 0
+}
+human_bytes() {  # $1 bytes → "12.4 MB" / "1.8 GB" (best-effort; falls back to raw bytes)
+  awk -v b="${1:-0}" 'BEGIN{
+    if (b>=1073741824) printf "%.1f GB", b/1073741824;
+    else if (b>=1048576) printf "%.1f MB", b/1048576;
+    else if (b>=1024) printf "%.1f KB", b/1024;
+    else printf "%d B", b }' 2>/dev/null || printf '%s B' "${1:-0}"
+}
+discord_ok() {  # $1 = backup name, $2 = one-line description (plain text we control)
+  local hook payload
+  hook="$(discord_webhook)" || return 0
+  [ -n "$hook" ] || return 0
+  payload="{\"embeds\":[{\"title\":\"✅ $1\",\"description\":\"$2\",\"color\":3066993}]}"
+  curl -s --max-time 10 -XPOST "$hook" -H 'Content-Type: application/json' --data "$payload" >/dev/null 2>&1 || true
+}
+
 START=$(date +%s); OK=0; METRIC_BYTES=0
 emit_metric() {
   local dur=$(( $(date +%s) - START ))
+  # Best-effort green Discord post on success — independent of the influx token below.
+  if [ "${OK:-0}" = "1" ]; then
+    discord_ok "Wikipedia backup" "R2 snapshot · $(human_bytes "$METRIC_BYTES") · ${dur}s"
+  fi
   [ -n "${INFLUX_OPS_TOKEN:-}" ] || { echo "INFLUX_OPS_TOKEN unset — skipping dashboard metric"; return; }
   local url="${INFLUX_URL:-http://localhost:8086}/api/v2/write?org=${INFLUX_ORG:-home}&bucket=${INFLUX_OPS_BUCKET:-ops}&precision=s"
   curl -fsS -XPOST "$url" -H "Authorization: Token ${INFLUX_OPS_TOKEN}" \
