@@ -9,6 +9,7 @@ Tools:
 The DB is opened read-only, so any number of agents/processes can share it.
 Run:  uv run --project /Volumes/dev/data/wikipedia python scripts/mcp_server.py
 """
+
 from __future__ import annotations
 
 import os
@@ -17,7 +18,11 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-DB_PATH = Path(os.environ.get("WIKI_DB", Path(__file__).resolve().parent.parent / "data" / "wiki.db"))
+DB_PATH = Path(
+    os.environ.get(
+        "WIKI_DB", Path(__file__).resolve().parent.parent / "data" / "wiki.db"
+    )
+)
 
 mcp = FastMCP("wikipedia-local")
 
@@ -70,7 +75,8 @@ def get_article(title_or_id: str, max_chars: int | None = None) -> dict:
         row = None
         if title_or_id.isdigit():
             row = con.execute(
-                "SELECT id, title, slug, text FROM articles WHERE id=?", (int(title_or_id),)
+                "SELECT id, title, slug, text FROM articles WHERE id=?",
+                (int(title_or_id),),
             ).fetchone()
         if row is None:
             row = con.execute(
@@ -87,7 +93,8 @@ def get_article(title_or_id: str, max_chars: int | None = None) -> dict:
             ).fetchone()
             if hit:
                 row = con.execute(
-                    "SELECT id, title, slug, text FROM articles WHERE id=?", (hit["id"],)
+                    "SELECT id, title, slug, text FROM articles WHERE id=?",
+                    (hit["id"],),
                 ).fetchone()
         if row is None:
             return {"error": f"no article found for {title_or_id!r}"}

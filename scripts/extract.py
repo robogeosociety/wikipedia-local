@@ -11,6 +11,7 @@ Usage:
     uv run python scripts/extract.py data/wikipedia_en_all_nopic_2026-03.zim data/wiki.db
     uv run python scripts/extract.py <zim> <db> --workers 6
 """
+
 from __future__ import annotations
 
 import os
@@ -86,7 +87,10 @@ def worker(zim_path: str, shard_db: str, start: int, end: int, wid: int) -> None
             con.executemany("INSERT INTO a VALUES (?,?,?)", rows)
             con.commit()
             rows.clear()
-            print(f"[w{wid}] {i - start:,}/{end - start:,} scanned, {kept:,} kept", flush=True)
+            print(
+                f"[w{wid}] {i - start:,}/{end - start:,} scanned, {kept:,} kept",
+                flush=True,
+            )
     if rows:
         con.executemany("INSERT INTO a VALUES (?,?,?)", rows)
         con.commit()
@@ -139,7 +143,10 @@ def main(
 
     t0 = time.time()
     procs = [
-        Process(target=worker, args=(str(zim_path), shards[k], bounds[k][0], bounds[k][1], k))
+        Process(
+            target=worker,
+            args=(str(zim_path), shards[k], bounds[k][0], bounds[k][1], k),
+        )
         for k in range(nw)
     ]
     for p in procs:
@@ -157,7 +164,9 @@ def main(
     build_schema(con)
     for s in shards:
         con.execute("ATTACH ? AS shard", (s,))
-        con.execute("INSERT INTO articles(title, slug, text) SELECT title, slug, text FROM shard.a")
+        con.execute(
+            "INSERT INTO articles(title, slug, text) SELECT title, slug, text FROM shard.a"
+        )
         con.commit()
         con.execute("DETACH shard")
     kept = con.execute("SELECT count(*) FROM articles").fetchone()[0]
