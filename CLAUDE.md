@@ -22,9 +22,25 @@ can query the same file concurrently.
 
 MCP server `wikipedia-local` is registered at **user scope** (`~/.claude.json`), so it's
 available in every Claude Code session. It exposes:
-- `search_wikipedia(query, limit=10)` → ranked `[{id, title, snippet}]` (FTS5 bm25).
-- `get_article(title_or_id, max_chars=None)` → full article `{id, title, slug, text}`.
-- `suggest(prefix, limit=10)` → title autocomplete.
+- `search_wikipedia(query, limit=10, wiki="enwiki")` → ranked `[{id, title, snippet}]` (FTS5 bm25).
+- `get_article(title_or_id, max_chars=None, wiki="enwiki")` → full article `{id, title, slug, text}`
+  (custom wikis also return `frontmatter`).
+- `suggest(prefix, limit=10, wiki="enwiki")` → title autocomplete.
+- `list_wikis()` → the wikis this server can query (name, `article_count`, provenance).
+
+## Custom wikis — multi-wiki host
+
+Beyond enwiki, this repo hosts Tommy's own **authoritative wikis**: git-versioned markdown
+under `wikis/<name>/` (e.g. `wikis/dev/`, `wikis/atlas/`) compiled by `scripts/build_wiki.py`
+into `data/<name>.db` with the **same `articles` + FTS5 schema as `wiki.db`**, plus one
+`article_meta(article_id, frontmatter)` side table. Every MCP tool takes a `wiki=` argument
+(default `enwiki`) so agents search/read them the same way. The content pipeline (triggers,
+templates, research) lives in the sibling `obsidian-automations` repo, which PRs markdown into
+`wikis/` and dispatches a rebuild — see `robogeosociety/obsidian-automations` PR #245.
+
+- **Local `<name>.db` is derived from git.** Unlike enwiki, custom wikis get **no R2 snapshot** —
+  the `wikis/` markdown in git *is* the authority and the DR copy; `build_wiki.py` rebuilds the
+  DB from a checkout in seconds. `r2_sync.sh`/`r2_pull.sh`/`refresh.sh` stay **enwiki-only**.
 
 Re-register on another machine with:
 ```sh
