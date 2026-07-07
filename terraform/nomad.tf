@@ -6,3 +6,14 @@
 resource "nomad_job" "wikipedia_refresh" {
   jobspec = file("${path.module}/../nomad/wikipedia-refresh.nomad")
 }
+
+# Custom-wiki build/deploy: a parameterized dispatch job (fired by the
+# obsidian-automations lanes after they merge article markdown) + a daily cron
+# backstop. Both run scripts/build_wikis.sh (DB + Quartz → Cloudflare Pages).
+resource "nomad_job" "wiki_build" {
+  jobspec = file("${path.module}/../nomad/wiki-build.nomad")
+}
+
+resource "nomad_job" "wiki_build_cron" {
+  jobspec = file("${path.module}/../nomad/wiki-build-cron.nomad")
+}
