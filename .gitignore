@@ -7,6 +7,12 @@ __pycache__/
 # Rebuilt from the ZIM via scripts/extract.py; off-site copies live in R2.
 /data/
 
+# Quartz site shell — the vendored framework is committed; build artifacts are not.
+/site/node_modules/
+/site/public/
+/site/content/
+/site/.quartz-cache/
+
 # Tooling local state
 .wrangler/
 .claude/settings.local.json
