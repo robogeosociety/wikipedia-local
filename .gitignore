@@ -8,9 +8,10 @@ __pycache__/
 /data/
 
 # Quartz site shell — the vendored framework is committed; build artifacts are not.
+# (Content builds straight from wikis/<name> via `quartz build -d`, never staged into
+# site/content — Quartz skips git-ignored content, so a staged copy renders empty.)
 /site/node_modules/
 /site/public/
-/site/content/
 /site/.quartz-cache/
 
 # Tooling local state
