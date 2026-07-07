@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import shutil
 import sqlite3
+import sys
 import tempfile
 import time
 from multiprocessing import Process
@@ -25,6 +26,9 @@ from pathlib import Path
 import typer
 from libzim.reader import Archive
 from selectolax.parser import HTMLParser
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wikidb import build_schema  # noqa: E402
 
 app = typer.Typer(add_completion=False)
 
@@ -96,26 +100,6 @@ def worker(zim_path: str, shard_db: str, start: int, end: int, wid: int) -> None
         con.commit()
     con.close()
     print(f"[w{wid}] DONE ids {start:,}-{end:,}: {kept:,} articles", flush=True)
-
-
-def build_schema(con: sqlite3.Connection) -> None:
-    con.executescript(
-        """
-        CREATE TABLE articles (
-            id    INTEGER PRIMARY KEY,
-            title TEXT NOT NULL,
-            slug  TEXT,
-            text  TEXT
-        );
-        CREATE VIRTUAL TABLE articles_fts USING fts5(
-            title, text,
-            content='articles',
-            content_rowid='id',
-            tokenize='porter unicode61'
-        );
-        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-        """
-    )
 
 
 @app.command()

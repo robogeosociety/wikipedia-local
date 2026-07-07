@@ -5,7 +5,11 @@ requires-python = ">=3.11"
 dependencies = [
     "libzim>=3.10.0",
     "mcp[cli]>=1.27.2",
+    "pyyaml>=6.0.0",
     "selectolax>=0.4.10",
     "tqdm>=4.67.3",
     "typer>=0.26.7",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8.0.0"]
