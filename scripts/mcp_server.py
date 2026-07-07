@@ -14,9 +14,13 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from wikidb import connect_immutable, fts_query as _fts_query  # noqa: E402
 
 DB_PATH = Path(
     os.environ.get(
@@ -29,16 +33,7 @@ mcp = FastMCP("wikipedia-local")
 
 def _connect() -> sqlite3.Connection:
     # Immutable: no locking, many concurrent readers, fastest reads.
-    uri = f"file:{DB_PATH}?immutable=1"
-    con = sqlite3.connect(uri, uri=True, check_same_thread=False)
-    con.row_factory = sqlite3.Row
-    return con
-
-
-def _fts_query(raw: str) -> str:
-    """Make arbitrary user text safe as an FTS5 MATCH by quoting each token."""
-    tokens = [t for t in raw.replace('"', " ").split() if t]
-    return " ".join(f'"{t}"' for t in tokens) if tokens else '""'
+    return connect_immutable(DB_PATH)
 
 
 @mcp.tool()

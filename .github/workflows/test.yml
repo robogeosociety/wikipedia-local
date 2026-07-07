@@ -1,0 +1,19 @@
+# Pytest gate for the wiki build layer (hermetic — no ZIM, no network).
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync deps
+        run: uv sync --group dev
+      - name: Pytest
+        run: uv run pytest
