@@ -35,12 +35,12 @@ if [ ! -d "$SITE/node_modules" ]; then
   (cd "$SITE" && npm install --no-audit --no-fund --ignore-scripts)
 fi
 
-# Stage the wiki's markdown as Quartz content (fresh each build).
-rm -rf "$SITE/content"
-cp -r "$SRC" "$SITE/content"
-
+# Build straight from the tracked wikis/<name> tree. (Do NOT copy into
+# site/content: Quartz respects .gitignore during content discovery, and the
+# build artifacts there are ignored — so a staged copy renders as ZERO pages.
+# Pointing -d at the tracked source also gives Quartz real git dates.)
 echo "$(date '+%F %T') $WIKI: quartz build ($BASEURL)"
-(cd "$SITE" && WIKI_TITLE="$TITLE" WIKI_BASEURL="$BASEURL" npx quartz build)
+(cd "$SITE" && WIKI_TITLE="$TITLE" WIKI_BASEURL="$BASEURL" npx quartz build -d "$SRC")
 echo "$(date '+%F %T') $WIKI: built → $SITE/public"
 
 [ "$DEPLOY" = "--deploy" ] || { echo "$WIKI: build-only (pass --deploy to publish)"; exit 0; }
