@@ -1,0 +1,28 @@
+# weights.toml — topic boosts + hot-cache warm list for the wikipedia-local server.
+#
+# This file is reviewed policy: merging a change to it IS the grant (the same
+# contract as discobots' bindings.toml / vault-rag.toml). scripts/weights.py
+# loads it strictly — unknown keys, missing titles, or a non-numeric weight
+# fail loudly at startup; an absent file means neutral behaviour, stated once.
+#
+# Per topic:
+#   titles  — exact enwiki article titles the topic resolves to (rebuilt into
+#             data/weights.db by scripts/build_weights.py after every refresh,
+#             because article ids change with each monthly ZIM rebuild).
+#   weight  — multiplies the bm25 rank (1.0 = neutral, >1 boosts). Applied only
+#             to enwiki queries.
+#   cache   — warm this topic into data/hot/ (scripts/warm_cache.py) so exact
+#             topic/title/alias queries skip FTS entirely.
+#   aliases — extra query strings that route to this topic before FTS runs.
+
+[topics.diabetes]
+titles = ["Diabetes", "Type 2 diabetes", "Type 1 diabetes"]
+weight = 3.0
+cache = true
+aliases = ["diabetes mellitus"]
+
+[topics.tirzepatide]
+titles = ["Tirzepatide"]
+weight = 3.0
+cache = true
+aliases = ["mounjaro", "zepbound"]
