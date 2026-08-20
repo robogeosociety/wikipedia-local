@@ -27,6 +27,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import weights  # noqa: E402
 from wikidb import connect_immutable, fts_query as _fts_query  # noqa: E402
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -34,6 +35,17 @@ DATA_DIR = Path(os.environ.get("WIKI_DATA_DIR", _REPO / "data"))
 # enwiki keeps its own env for backward compat with the user-scope registration.
 DB_PATH = Path(os.environ.get("WIKI_DB", DATA_DIR / "wiki.db"))
 ENWIKI = "enwiki"
+
+# Reviewed topic policy (weights.toml). Invalid config fails loudly here, at
+# startup; an absent config is the one legitimate neutral state.
+TOPICS = weights.load_config()
+if not TOPICS:
+    weights.warn("no weights.toml — running with neutral ranking, no hot cache")
+_ROUTES = weights.alias_map(TOPICS)
+# warm_cache.py flips this off so it renders through the live FTS path.
+HOT_ENABLED = True
+COUNTER_URL = os.environ.get("WIKI_COUNTER_URL", "redis://127.0.0.1:6379")
+COUNTER_TTL = 7 * 86400
 
 mcp = FastMCP("wikipedia-local")
 
@@ -65,6 +77,90 @@ def _unknown(wiki: str) -> dict:
     }
 
 
+def _source_zim(con: sqlite3.Connection, table: str = "meta") -> str:
+    row = con.execute(f"SELECT value FROM {table} WHERE key='source_zim'").fetchone()
+    return row[0] if row else ""
+
+
+def _attach_weights(con: sqlite3.Connection) -> bool:
+    """ATTACH data/weights.db as `w` if present AND built from the live ZIM.
+
+    A stale or missing sidecar degrades to neutral bm25 ranking, never to a
+    wrong boost (article ids are not stable across monthly rebuilds).
+    """
+    db = DATA_DIR / weights.WEIGHTS_DB_NAME
+    if not db.exists():
+        return False
+    try:
+        con.execute("ATTACH DATABASE ? AS w", (f"file:{db}?immutable=1",))
+        if _source_zim(con, "w.meta") != _source_zim(con):
+            con.execute("DETACH DATABASE w")
+            return False
+        return True
+    except sqlite3.Error:
+        return False
+
+
+def _count_topic(topic: str) -> None:
+    """Best-effort windowed hit counter (`wiki:topic:<name>`) on the local
+    Valkey — the discobots bus degradability contract: no redis-py or no bus
+    means a silent no-op, and every key carries a TTL (the bus runs noeviction).
+    Only topics already named in the reviewed weights.toml are ever counted;
+    raw query strings never leave the process.
+    """
+    try:
+        import redis  # noqa: PLC0415 — optional, deliberately not a dependency
+
+        r = redis.Redis.from_url(
+            COUNTER_URL, socket_timeout=0.1, socket_connect_timeout=0.1
+        )
+        key = f"wiki:topic:{topic}"
+        with r.pipeline(transaction=False) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, COUNTER_TTL)
+            pipe.execute()
+    except Exception:
+        pass
+
+
+def _hot_payload(query: str) -> dict | None:
+    """The pre-rendered payload for an exact topic/title/alias query, or None.
+
+    Trusted only when the manifest's source_zim matches the live wiki.db —
+    stale cache degrades to the FTS path, never to a stale answer.
+    """
+    if not HOT_ENABLED:
+        return None
+    index = DATA_DIR / weights.HOT_DIR_NAME / "index.json"
+    if not index.exists():
+        return None
+    try:
+        manifest = json.loads(index.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    con = _connect(ENWIKI)
+    if con is None:
+        return None
+    try:
+        if manifest.get("source_zim") != _source_zim(con):
+            return None
+    finally:
+        con.close()
+    norm = weights.normalize(query)
+    for entry in manifest.get("topics", {}).values():
+        if norm in entry.get("routes", []):
+            try:
+                return json.loads((index.parent / entry["file"]).read_text())
+            except (OSError, json.JSONDecodeError, KeyError):
+                return None
+    return None
+
+
+def _route(query: str) -> str | None:
+    """The configured topic this query names exactly, if any (for counting)."""
+    return _ROUTES.get(weights.normalize(query))
+
+
 def _has_article_meta(con: sqlite3.Connection) -> bool:
     return (
         con.execute(
@@ -81,18 +177,33 @@ def search_wikipedia(query: str, limit: int = 10, wiki: str = ENWIKI) -> list[di
     Set `wiki` to query a custom wiki instead (e.g. "dev", "atlas") — see list_wikis().
     """
     limit = max(1, min(limit, 50))
+    if wiki == ENWIKI:
+        if (topic := _route(query)) is not None:
+            _count_topic(topic)
+        if (hot := _hot_payload(query)) is not None:
+            return [dict(h, served_from="hot-cache") for h in hot["search"][:limit]]
     con = _connect(wiki)
     if con is None:
         return [_unknown(wiki)]
     try:
+        weighted = wiki == ENWIKI and _attach_weights(con)
+        weight_join, weight_rank = (
+            (
+                "LEFT JOIN w.weights wt ON wt.article_id = a.id",
+                " * COALESCE(wt.weight, 1.0)",
+            )
+            if weighted
+            else ("", "")
+        )
         rows = con.execute(
-            """
+            f"""
             SELECT a.id AS id, a.title AS title,
                    snippet(articles_fts, 1, '«', '»', ' … ', 12) AS snippet
             FROM articles_fts
             JOIN articles a ON a.id = articles_fts.rowid
+            {weight_join}
             WHERE articles_fts MATCH ?
-            ORDER BY bm25(articles_fts)
+            ORDER BY bm25(articles_fts){weight_rank}
             LIMIT ?
             """,
             (_fts_query(query), limit),
@@ -110,6 +221,20 @@ def get_article(
     (default enwiki). Falls back to the best full-text match when there is no
     exact title. For custom wikis the article's `frontmatter` is included.
     """
+    if wiki == ENWIKI and not title_or_id.isdigit():
+        if (topic := _route(title_or_id)) is not None:
+            _count_topic(topic)
+        if (hot := _hot_payload(title_or_id)) is not None:
+            norm = weights.normalize(title_or_id)
+            art = hot["articles"].get(norm) or hot["articles"].get(hot["primary"])
+            if art is not None:
+                text = art["text"]
+                truncated = bool(max_chars and len(text) > max_chars)
+                if truncated:
+                    text = text[:max_chars]
+                return dict(
+                    art, text=text, truncated=truncated, served_from="hot-cache"
+                )
     con = _connect(wiki)
     if con is None:
         return _unknown(wiki)
@@ -126,10 +251,20 @@ def get_article(
                 (title_or_id,),
             ).fetchone()
         if row is None:
+            weighted = wiki == ENWIKI and _attach_weights(con)
+            weight_join, weight_rank = (
+                (
+                    "LEFT JOIN w.weights wt ON wt.article_id = a.id",
+                    " * COALESCE(wt.weight, 1.0)",
+                )
+                if weighted
+                else ("", "")
+            )
             hit = con.execute(
-                """
+                f"""
                 SELECT a.id FROM articles_fts JOIN articles a ON a.id = articles_fts.rowid
-                WHERE articles_fts MATCH ? ORDER BY bm25(articles_fts) LIMIT 1
+                {weight_join}
+                WHERE articles_fts MATCH ? ORDER BY bm25(articles_fts){weight_rank} LIMIT 1
                 """,
                 (_fts_query(title_or_id),),
             ).fetchone()

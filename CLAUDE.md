@@ -48,6 +48,29 @@ claude mcp add --scope user wikipedia-local -- \
   uv run --project /Volumes/dev/data/wikipedia python /Volumes/dev/data/wikipedia/scripts/mcp_server.py
 ```
 
+## Topic weights + hot cache
+
+`weights.toml` (repo root) is the **reviewed policy** for frequently-queried topics —
+merging a change to it is the grant, exactly like discobots' `bindings.toml`. Per topic:
+`titles` (exact enwiki articles), `weight` (multiplies bm25 rank; enwiki only),
+`cache` (pre-render into `data/hot/`), `aliases` (query strings routed to the topic).
+
+- **Ranking:** `build_weights.py` resolves titles → current article ids into the
+  disposable sidecar `data/weights.db`; the server ATTACHes it and orders by
+  `bm25(articles_fts) * COALESCE(weight, 1.0)`. Ids change every monthly rebuild, so
+  `refresh.sh` reruns the build after the swap; a sidecar whose `source_zim` doesn't
+  match the live DB is ignored (neutral ranking, never a wrong boost).
+- **Hot cache:** `warm_cache.py` pre-renders each `cache = true` topic (ranked hits +
+  full article payloads) into `data/hot/<topic>.json` with an `index.json` manifest.
+  Exact topic/title/alias queries are served from it without touching FTS and carry
+  `"served_from": "hot-cache"`; a manifest built from a different ZIM falls back to FTS.
+- **Counters:** matches against *configured* topics bump `wiki:topic:<name>` on the
+  local Valkey (TTL'd, best-effort, silent no-op without redis-py or a bus). Raw query
+  strings are never logged or sent anywhere — only reviewed topic slugs are counted.
+  Read them from discobots with `just wiki-hot`.
+- **Absent config = neutral** (stated once on stderr); an *invalid* config fails the
+  server loudly at startup — no silent half-policy.
+
 ## Query it — direct SQL
 
 ```sh
@@ -71,6 +94,9 @@ FTS5 query syntax: `'term1 term2'` (AND), `'term1 OR term2'`, `'"exact phrase"'`
 | `scripts/download.sh [YYYY-MM]` | resumable ZIM download + checksum verify |
 | `scripts/extract.py <zim> <db>` | build `wiki.db` (articles + FTS5) from a ZIM |
 | `scripts/mcp_server.py` | the FastMCP stdio server |
+| `scripts/weights.py` | strict loader for `weights.toml` (topic boosts + hot-cache policy) |
+| `scripts/build_weights.py` | resolve configured titles → current ids into the `data/weights.db` sidecar |
+| `scripts/warm_cache.py` | pre-render `cache = true` topics into `data/hot/` + manifest |
 | `scripts/r2_sync.sh [db] [bucket] [date]` | sync content UP to R2: content-only, resumable, bw-capped; updates `latest` |
 | `scripts/r2_pull.sh [latest\|date] [out] [bucket]` | pull DOWN from R2 (default: latest), reassemble + rebuild FTS |
 | `scripts/refresh.sh` | monthly: newest ZIM → rebuild → R2 sync → prune |

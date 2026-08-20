@@ -31,6 +31,14 @@ rm -f "$DATA/wiki.db.new-wal" "$DATA/wiki.db.new-shm"
 mv -f "$DATA/wiki.db.new" "$DATA/wiki.db"
 echo "$latest" > "$marker"
 
+# Article ids changed with the swap: rebuild the derived ranking sidecar and
+# re-render the hot set (both disposable; skipped when no policy file exists).
+if [ -f "$ROOT/weights.toml" ]; then
+  echo "rebuilding weights sidecar + hot cache…"
+  uv run --project "$ROOT" python "$ROOT/scripts/build_weights.py"
+  uv run --project "$ROOT" python "$ROOT/scripts/warm_cache.py"
+fi
+
 echo "syncing to R2…"
 "$ROOT/scripts/r2_sync.sh" "$DATA/wiki.db"
 
